@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LaunchRadar — the pre-token board</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">◎</div>
+    <div>
+      <h1>LaunchRadar</h1>
+      <p class="tagline">Every protocol that records no token yet, ranked by what a launch could be worth — and how to farm it first.</p>
+    </div>
+  </div>
+  <div class="stats" id="stats"></div>
+</header>
+
+<section class="model" id="model"></section>
+
+<nav class="toolbar">
+  <input id="q" type="search" placeholder="Search name or slug…" aria-label="Search protocols">
+  <select id="cat" aria-label="Filter by category"></select>
+  <select id="chain" aria-label="Filter by chain"></select>
+  <label class="check"><input id="watch" type="checkbox"> Watchlist only</label>
+  <div class="views">
+    <button id="view-board" class="viewbtn active" type="button">Pre-token board</button>
+    <button id="view-live" class="viewbtn" type="button">Already trading</button>
+  </div>
+  <span class="count" id="count"></span>
+</nav>
+
+<main>
+  <table id="board">
+    <thead>
+      <tr>
+        <th data-sort="rank" class="num">Rank</th>
+        <th data-sort="name">Protocol</th>
+        <th data-sort="category">Category</th>
+        <th data-sort="tvl" class="num">TVL</th>
+        <th data-sort="change" class="num">7d change</th>
+        <th data-sort="implied" class="num">Implied value</th>
+        <th data-sort="ratio" class="num">Value / TVL</th>
+        <th>Farm plan</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <section id="live" hidden>
+    <p class="live-note">These protocols already have a token trading, so the radar does not rank them — a launch value would be a guess about a price that already exists. They are shown with the market's own figures as the reference set the category rates were calibrated against.</p>
+    <table id="livetable">
+      <thead><tr><th>Protocol</th><th>Category</th><th class="num">TVL</th><th class="num">Market cap</th><th class="num">Mcap / TVL</th></tr></thead>
+      <tbody id="liverows"></tbody>
+    </table>
+  </section>
+
+  <section id="detail" hidden></section>
+</main>
+
+<footer>
+  <p>Implied value is this board's own model claim, computed only from the snapshot's figures (TVL, seven-day change, listing age, chains, category) — it is not a prediction that a token will be issued. Snapshot: DefiLlama, as of <span id="asof"></span>. A protocol listed here records no token in that snapshot.</p>
+</footer>
+
+<script src="../data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
