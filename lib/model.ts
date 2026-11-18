@@ -12,8 +12,17 @@
 //   implied = tvl x categoryRate x momentum x maturity x breadth
 //
 //   categoryRate  the share of TVL that comparable, already-tokenised
-//                 protocols in the same category tend to carry as value;
-//                 stated per category below and printed on the dashboard.
+//                 protocols in the same category carry as value in this
+//                 snapshot: the median market-cap/TVL of the category's
+//                 traded protocols, shrunk toward the global median when
+//                 the category has few traded peers (weight 4), after
+//                 every peer ratio is winsorised at the peer set's 90th
+//                 percentile so one extreme peer cannot set the rate.
+//                 Implied values also carry the peer spread — the shrunk 25th
+//                 to 75th percentile band — as a range. No rate is
+//                 stated by hand: every one is derived from the
+//                 snapshot's own traded rows and printed, with its peer
+//                 count, on the dashboard.
 //   momentum      1 + clamp(change_7d, -50, 100) / 100 x 0.6 — a protocol
 //                 gaining TVL is launching into demand; a shrinking one
 //                 is discounted. Unreported change counts as neutral.
@@ -88,6 +97,10 @@ export interface RowDetail {
   watchlist: boolean;
   rank: number;
   implied_value_usd: number;
+  implied_low_usd: number;
+  implied_high_usd: number;
+  peers: { n: number; median: number };
+  flags: string[];
   ratio: number;
   factors: { category_rate: number; momentum: number; maturity: number; breadth: number };
   farm_steps: string[];
@@ -115,42 +128,75 @@ export interface RadarData {
   chains: string[];
   rows: RowDetail[];
   live: LiveRow[];
-  model: { category_rates: Record<string, number>; default_rate: number; momentum_weight: number; momentum_floor: number; momentum_cap: number };
+  model: {
+    peers_total: number;
+    winsor_cap: number;
+    global_median: number;
+    global_q1: number;
+    global_q3: number;
+    shrink_k: number;
+    category_rates: Record<string, number>;
+    category_peers: Record<string, number>;
+    momentum_weight: number;
+    momentum_floor: number;
+    momentum_cap: number;
+  };
 }
 
-/** Category value rates: value carried per dollar of TVL at launch. */
-export const CATEGORY_RATES: Record<string, number> = {
-  'Dexs': 0.8,
-  'Derivatives': 0.9,
-  'Lending': 0.55,
-  'CDP': 0.5,
-  'RWA': 0.6,
-  'Bridge': 0.45,
-  'Yield Aggregator': 0.4,
-  'Onchain Capital Allocator': 0.4,
-  'Yield': 0.35,
-  'Risk Curators': 0.35,
-  'Liquid Staking': 0.3,
-  'Liquid Restaking': 0.3,
-  'Canonical Bridge': 0.25,
-  'Basis Trading': 0.5,
-  'Chain': 1.0,
-  'Payments': 0.5,
-  'NFT Marketplace': 0.45,
-  'Gaming': 0.5,
-  'Launchpad': 0.6,
-  'Oracle': 0.7,
-  'Indexes': 0.3,
-  'Staking Pool': 0.3,
-  'Farm': 0.3,
-  'Options': 0.6,
-  'Insurance': 0.4,
-  'Cross Chain': 0.45,
-};
-export const DEFAULT_RATE = 0.4;
 export const MOMENTUM_WEIGHT = 0.6;
 export const MOMENTUM_FLOOR = -50;
 export const MOMENTUM_CAP = 100;
+/** Peer-count weight of the global median when a category rate is shrunk toward it. */
+export const SHRINK_K = 4;
+
+function r4(v: number): number {
+  return Math.round(v * 10000) / 10000;
+}
+
+/** One quantile of an ascending-sorted set (linear interpolation, deterministic). */
+export function quantileOf(sorted: number[], q: number): number {
+  if (sorted.length === 0) return 0;
+  const pos = (sorted.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return lo === hi ? sorted[lo]! : sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (pos - lo);
+}
+
+/** Peer ratios are winsorised at this quantile of the whole peer set before any rate is taken. */
+export const WINSOR_Q = 0.9;
+
+/** Median and quartiles of a set of ratios (linear interpolation, deterministic). */
+export function peerStats(ratios: number[]): { n: number; median: number; q1: number; q3: number } {
+  const s = ratios.slice().sort((a, b) => a - b);
+  return { n: s.length, median: quantileOf(s, 0.5), q1: quantileOf(s, 0.25), q3: quantileOf(s, 0.75) };
+}
+
+/** The category rate in use, its peer-spread band, and the peer basis behind it. */
+export interface RateInfo {
+  rate: number;
+  low: number;
+  high: number;
+  peers: number;
+  median: number;
+}
+
+/** Shrink a category's peer stats toward the global ones; with no peers the global rate is the rate. */
+export function rateFromPeers(
+  cat: { n: number; median: number; q1: number; q3: number } | undefined,
+  global: { n: number; median: number; q1: number; q3: number },
+): RateInfo {
+  if (cat === undefined || cat.n === 0) {
+    return { rate: r4(global.median), low: r4(global.q1), high: r4(global.q3), peers: 0, median: global.median };
+  }
+  const mix = (v: number, g: number) => (cat.n * v + SHRINK_K * g) / (cat.n + SHRINK_K);
+  return {
+    rate: r4(mix(cat.median, global.median)),
+    low: r4(mix(cat.q1, global.q1)),
+    high: r4(mix(cat.q3, global.q3)),
+    peers: cat.n,
+    median: cat.median,
+  };
+}
 
 /** Parse the snapshot text; throws on a shape this model cannot read. */
 export function parseSnapshot(text: string): Snapshot {
@@ -174,15 +220,28 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
-/** The four model factors for one protocol. */
-export function factorsOf(p: SnapshotProtocol, asOf: string): RowDetail['factors'] {
-  const category_rate = CATEGORY_RATES[p.category ?? ''] ?? DEFAULT_RATE;
+/** The four model factors for one protocol, given its derived category rate. */
+export function factorsOf(p: SnapshotProtocol, asOf: string, categoryRate: number): RowDetail['factors'] {
+  const category_rate = categoryRate;
   const growth = p.change_7d === null ? 0 : clamp(p.change_7d, MOMENTUM_FLOOR, MOMENTUM_CAP);
   const momentum = 1 + (growth / 100) * MOMENTUM_WEIGHT;
   const age = daysBetween(p.listed_at, asOf);
   const maturity = age === null ? 0.775 : 0.55 + 0.45 * (Math.min(age, 1460) / 1460);
   const breadth = 1 + 0.03 * Math.min(Math.max(p.chains.length - 1, 0), 5);
   return { category_rate, momentum, maturity, breadth };
+}
+
+/** Factual cautions a row carries, read from its own figures only. */
+export function flagsOf(p: SnapshotProtocol, asOf: string, ri: RateInfo): string[] {
+  const flags: string[] = [];
+  if (p.change_7d !== null && p.change_7d <= -20) flags.push('TVL down sharply over 7 days');
+  if (p.change_7d === null) flags.push('No 7-day change reported');
+  if (ri.peers === 0) flags.push('No traded peers in its category — global rate');
+  else if (ri.peers < 3) flags.push(`Only ${ri.peers} traded peer${ri.peers === 1 ? '' : 's'} — rate shrunk toward the global median`);
+  const age = daysBetween(p.listed_at, asOf);
+  if (age !== null && age < 180) flags.push('Tracked for under 6 months');
+  if (p.chains.length === 1) flags.push('Single chain');
+  return flags.slice(0, 4);
 }
 
 /** Whole-dollar formatting the farm steps use, e.g. 2500 -> "$2,500". */
@@ -287,10 +346,36 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
   });
   const liveAll = snapshot.protocols.filter((p) => p.mcap_usd !== null);
 
+  // Category rates are derived, not stated: the traded rows that are not
+  // set aside form the peer set, grouped by category over the whole set.
+  const peerRows = snapshot.protocols.filter((p) => p.mcap_usd !== null && p.tvl_usd > 0 && asideReason(p) === null);
+  // Winsorise the peer ratios at the peer set's 90th percentile: a single
+  // protocol whose token trades at hundreds of times its recorded TVL
+  // must not be allowed to set a whole category's rate.
+  const rawRatios = peerRows.map((p) => (p.mcap_usd ?? 0) / p.tvl_usd);
+  const winsorCap = quantileOf(rawRatios.slice().sort((a, b) => a - b), WINSOR_Q);
+  const peerRatios = rawRatios.map((r) => Math.min(r, winsorCap));
+  const globalStats = peerStats(peerRatios);
+  const byCat = new Map<string, number[]>();
+  peerRows.forEach((p, i) => {
+    if (p.category === null) return;
+    const arr = byCat.get(p.category) ?? [];
+    arr.push(peerRatios[i]!);
+    byCat.set(p.category, arr);
+  });
+  const catStats = new Map<string, ReturnType<typeof peerStats>>();
+  for (const [c, arr] of byCat) catStats.set(c, peerStats(arr));
+  const rateOf = (p: SnapshotProtocol): RateInfo =>
+    rateFromPeers(p.category === null ? undefined : catStats.get(p.category), globalStats);
+
   const scored = preToken.map((p) => {
-    const f = factorsOf(p, snapshot.as_of);
-    const implied = Math.max(1, Math.round(p.tvl_usd * f.category_rate * f.momentum * f.maturity * f.breadth));
-    return { p, f, implied };
+    const ri = rateOf(p);
+    const f = factorsOf(p, snapshot.as_of, ri.rate);
+    const rest = f.momentum * f.maturity * f.breadth;
+    const implied = Math.max(1, Math.round(p.tvl_usd * ri.rate * rest));
+    const implied_low = Math.max(1, Math.round(p.tvl_usd * ri.low * rest));
+    const implied_high = Math.max(implied, Math.round(p.tvl_usd * ri.high * rest));
+    return { p, f, ri, implied, implied_low, implied_high };
   });
   // Rank by implied value; ties fall to TVL, then slug, so two runs agree byte for byte.
   scored.sort((a, b) => b.implied - a.implied || b.p.tvl_usd - a.p.tvl_usd || (a.p.slug < b.p.slug ? -1 : 1));
@@ -306,6 +391,10 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     watchlist: watch.has(s.p.slug),
     rank: i + 1,
     implied_value_usd: s.implied,
+    implied_low_usd: s.implied_low,
+    implied_high_usd: s.implied_high,
+    peers: { n: s.ri.peers, median: Math.round(s.ri.median * 1000) / 1000 },
+    flags: flagsOf(s.p, snapshot.as_of, s.ri),
     ratio: Math.round((s.implied / Math.max(1, s.p.tvl_usd)) * 1000) / 1000,
     factors: s.f,
     farm_steps: farmSteps(s.p),
@@ -341,8 +430,14 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     rows,
     live,
     model: {
-      category_rates: CATEGORY_RATES,
-      default_rate: DEFAULT_RATE,
+      peers_total: globalStats.n,
+      winsor_cap: r4(winsorCap),
+      global_median: r4(globalStats.median),
+      global_q1: r4(globalStats.q1),
+      global_q3: r4(globalStats.q3),
+      shrink_k: SHRINK_K,
+      category_rates: Object.fromEntries(categories.map((c) => [c, rateFromPeers(catStats.get(c), globalStats).rate])),
+      category_peers: Object.fromEntries(categories.map((c) => [c, catStats.get(c)?.n ?? 0])),
       momentum_weight: MOMENTUM_WEIGHT,
       momentum_floor: MOMENTUM_FLOOR,
       momentum_cap: MOMENTUM_CAP,

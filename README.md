@@ -21,18 +21,32 @@ watchlist leaves them out.
 Implied value = TVL × category rate × momentum × maturity × breadth,
 computed only from the snapshot's own figures:
 
-- **category rate** — value carried per $1 of TVL, per category (stated in
-  `lib/model.ts` and on the dashboard);
+- **category rate** — derived, never stated by hand: the median
+  market-cap/TVL of the category's already-trading protocols in the
+  same snapshot, after every peer ratio is winsorised at the peer
+  set's 90th percentile (one protocol trading at hundreds of times
+  its TVL cannot set a category's rate), and shrunk toward the global
+  median (weight 4) when a category has few traded peers — the global
+  median itself when it has none;
 - **momentum** — from the seven-day TVL change, clamped −50%…+100%,
   weight 0.6; unreported change is neutral;
 - **maturity** — grows with the years a protocol has run with no token
   (listed_at against the snapshot's as_of date);
 - **breadth** — +3% per additional chain, capped at +15%.
 
-No protocol is scored by name: one function prices every row, and the
-dashboard's detail view shows each protocol's four factors. Every row
-carries a five-to-six-step farm plan written from its category, home
-chain and TVL tier, with position sizes, gas budgets and week counts.
+Every implied value is shown with its peer range — the same
+calculation at the shrunk 25th and 75th percentiles of the category's
+peer spread — because a point estimate would claim a precision the
+peer set does not support. Each row's detail view shows its four
+factors, the peer basis behind its rate (how many traded peers, at
+what median), and factual caution flags read from its own figures
+(sharply falling TVL, single chain, short track record, thin peer
+set).
+
+No protocol is scored by name: one function prices every row. Every
+row carries a five-to-six-step farm plan written from its category,
+home chain and TVL tier, with position sizes, gas budgets and week
+counts.
 
 ## The dashboard
 

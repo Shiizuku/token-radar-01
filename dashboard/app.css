@@ -106,3 +106,9 @@ button.close {
   border-radius: 8px; padding: 5px 12px; cursor: pointer;
 }
 footer { padding: 6px 28px 26px; color: var(--faint); font-size: 13px; max-width: 1000px; }
+.range { color: var(--faint); font-size: 12px; font-weight: 400; }
+.flags { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 12px; }
+.flag {
+  padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  background: rgba(245,181,68,.08); color: var(--amber); border: 1px solid rgba(245,181,68,.4);
+}
