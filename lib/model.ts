@@ -127,6 +127,14 @@ export interface RadarData {
   categories: string[];
   chains: string[];
   rows: RowDetail[];
+  insights: {
+    total_implied_usd: number;
+    top_category: string;
+    top_category_implied_usd: number;
+    fastest_watchlist_name: string | null;
+    fastest_watchlist_change: number | null;
+    median_implied_usd: number;
+  };
   live: LiveRow[];
   model: {
     peers_total: number;
@@ -299,21 +307,42 @@ function openingMove(p: SnapshotProtocol, home: string): string {
   }
 }
 
-/** The farm plan for one row: 5 concrete steps, each with cost or time stated. */
-export function farmSteps(p: SnapshotProtocol): string[] {
+/** A step written from the protocol's own current figures, when they say something specific. */
+function signalStep(p: SnapshotProtocol, asOf: string): string | null {
+  if (p.change_7d !== null && p.change_7d >= 20) {
+    return `Its TVL is up ${p.change_7d.toFixed(1)}% in seven days — momentum is building before any token exists. Start the routine now: wallets that were active before an announcement are the ones a launch can still reward; late arrivals farm against a crowd.`;
+  }
+  if (p.change_7d !== null && p.change_7d <= -20) {
+    return `Its TVL is down ${Math.abs(p.change_7d).toFixed(1)}% in seven days — a shrinking record. Size at the low end of the range, keep the routine cheap, and re-check monthly: if the slide continues, the team may have moved on and the plan should stop.`;
+  }
+  const age = daysBetween(p.listed_at, asOf);
+  const years = age === null ? null : Math.floor(age / 365);
+  if (years !== null && years >= 3) {
+    return `${p.name} has run ${years} years with no token — a long record by this board's standards. For a record like this, consistency beats size: a modest position held without gaps reads better than a large one that churns.`;
+  }
+  return null;
+}
+
+/** The farm plan for one row: concrete steps, each with cost or time stated. */
+export function farmSteps(p: SnapshotProtocol, asOf: string): string[] {
   const home = p.chains[0] ?? 'its main chain';
   const tier = tierOf(p.tvl_usd);
   const multi = p.chains.length > 1
     ? `Repeat the core action on a second chain ${n2(p)} within the first month: multi-chain users are consistently over-represented in launch allocations.`
     : `Stay on ${home} for the whole plan: depth on one chain beats a thin record spread across many.`;
-  return [
+  const steps = [
     openingMove(p, home),
     `Size the position at ${tier.stake} in total across the plan, funded gradually over the first two weeks; budget ${gasOf(home)} on top, and never farm with funds you cannot leave in place for ${tier.weeks}.`,
     `Keep the routine running for ${tier.weeks}: interact ${tier.cadence} (vary amounts and times of day), and snapshot your own balances monthly so you can prove continuity if a claim ever asks.`,
+  ];
+  const sig = signalStep(p, asOf);
+  if (sig !== null) steps.push(sig);
+  steps.push(
     multi,
     `Join ${p.name}'s official community channels and governance: vote in every public proposal during the plan (votes are free on most chains) and complete any official quest or testnet the team runs.`,
     `Set a monthly launch watch: re-check ${p.name}'s record (TVL trend, new chains, docs mentioning a token or points). If a points program or token appears, shift from passive holding to the program's stated tasks within the first week.`,
-  ];
+  );
+  return steps;
 }
 
 function n2(p: SnapshotProtocol): string {
@@ -397,7 +426,7 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     flags: flagsOf(s.p, snapshot.as_of, s.ri),
     ratio: Math.round((s.implied / Math.max(1, s.p.tvl_usd)) * 1000) / 1000,
     factors: s.f,
-    farm_steps: farmSteps(s.p),
+    farm_steps: farmSteps(s.p, snapshot.as_of),
   }));
 
   const board: BoardRow[] = rows.map((r) => ({
@@ -417,6 +446,27 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
   const categories = [...new Set(rows.map((r) => r.category ?? 'Uncategorised'))].sort();
   const chains = [...new Set(rows.flatMap((r) => r.chains))].sort();
 
+  // Board-level readings, computed from the ranked rows themselves.
+  const totalImplied = rows.reduce((a, r) => a + r.implied_value_usd, 0);
+  const byCatImplied = new Map<string, number>();
+  for (const r of rows) {
+    const c = r.category ?? 'Uncategorised';
+    byCatImplied.set(c, (byCatImplied.get(c) ?? 0) + r.implied_value_usd);
+  }
+  const topCat = [...byCatImplied.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0]!;
+  const watchRows = rows.filter((r) => r.watchlist && r.change_7d !== null);
+  const fastest = watchRows.length
+    ? watchRows.reduce((a, b) => ((b.change_7d ?? -Infinity) > (a.change_7d ?? -Infinity) ? b : a))
+    : null;
+  const insights: RadarData['insights'] = {
+    total_implied_usd: totalImplied,
+    top_category: topCat[0],
+    top_category_implied_usd: topCat[1],
+    fastest_watchlist_name: fastest?.name ?? null,
+    fastest_watchlist_change: fastest?.change_7d ?? null,
+    median_implied_usd: rows.length ? rows[Math.floor(rows.length / 2)]!.implied_value_usd : 0,
+  };
+
   const radar: RadarData = {
     as_of: snapshot.as_of,
     floor_usd: snapshot.floor_usd,
@@ -428,6 +478,7 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     categories,
     chains,
     rows,
+    insights,
     live,
     model: {
       peers_total: globalStats.n,

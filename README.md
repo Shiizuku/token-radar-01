@@ -44,9 +44,14 @@ what median), and factual caution flags read from its own figures
 set).
 
 No protocol is scored by name: one function prices every row. Every
-row carries a five-to-six-step farm plan written from its category,
-home chain and TVL tier, with position sizes, gas budgets and week
-counts.
+row carries a farm plan written from its category, home chain and
+TVL tier, with position sizes, gas budgets and week counts — plus,
+when its own figures say something specific, a signal step written
+from its seven-day TVL change (ride the momentum, or size down on a
+shrinking record) or its years on record. The dashboard opens with
+an insights strip computed from the board itself: combined implied
+value, the median row, the category holding the largest share, and
+the watchlist's fastest riser.
 
 ## The dashboard
 

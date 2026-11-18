@@ -48,6 +48,15 @@ $('model').innerHTML =
   rates.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${R.model.category_peers[k] ?? 0}</td><td>${v.toFixed(3)}</td></tr>`).join('') +
   `</table></details>`;
 
+// ---------- insights: what the board says ----------
+const I = R.insights;
+$('insights').innerHTML =
+  `<b>What the board says.</b> The ${R.rows.length} pre-token protocols carry ${compact(I.total_implied_usd)} of combined implied launch value; the median row sits at ${compact(I.median_implied_usd)}. ` +
+  `${esc(I.top_category)} holds the largest share of that value (${compact(I.top_category_implied_usd)}). ` +
+  (I.fastest_watchlist_name !== null
+    ? `Fastest riser on the watchlist this week: ${esc(I.fastest_watchlist_name)} (${I.fastest_watchlist_change > 0 ? '+' : ''}${I.fastest_watchlist_change.toFixed(1)}% TVL in seven days).`
+    : `No watchlist protocol reports a seven-day change in this snapshot.`);
+
 // ---------- toolbar ----------
 $('cat').innerHTML = `<option value="">All categories</option>` + R.categories.map((c) => `<option ${c === state.cat ? 'selected' : ''}>${esc(c)}</option>`).join('');
 $('chain').innerHTML = `<option value="">All chains</option>` + R.chains.map((c) => `<option ${c === state.chain ? 'selected' : ''}>${esc(c)}</option>`).join('');
@@ -82,7 +91,7 @@ function renderBoard() {
       <td class="cat">${esc(r.category ?? 'Uncategorised')}<br><span class="chains">${esc(r.chains.join(' · '))}</span></td>
       <td class="num">${money(r.tvl_usd)}</td>
       <td class="num">${pct(r.change_7d)}</td>
-      <td class="num implied">${money(r.implied_value_usd)}<br><span class="range">${compact(r.implied_low_usd)} – ${compact(r.implied_high_usd)}</span></td>
+      <td class="num implied">${money(r.implied_value_usd)}<br><span class="range">${compact(r.implied_low_usd)} – ${compact(r.implied_high_usd)}</span><div class="bar2"><i style="width:${Math.max(4, Math.round((100 * Math.log(Math.max(2, r.implied_value_usd))) / Math.log(R.rows[0].implied_value_usd)))}%"></i></div></td>
       <td class="num">${r.ratio.toFixed(2)}×</td>
       <td class="plan">${r.farm_steps.length} steps →</td>
     </tr>`).join('');
