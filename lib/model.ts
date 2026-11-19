@@ -100,6 +100,7 @@ export interface RowDetail {
   implied_low_usd: number;
   implied_high_usd: number;
   peers: { n: number; median: number };
+  confidence: { tier: 'high' | 'medium' | 'low'; band_pct: number };
   flags: string[];
   ratio: number;
   factors: { category_rate: number; momentum: number; maturity: number; breadth: number };
@@ -140,6 +141,7 @@ export interface RadarData {
     momentum_weight: number;
     momentum_floor: number;
     momentum_cap: number;
+    confidence_counts: { high: number; medium: number; low: number };
   };
 }
 
@@ -229,6 +231,29 @@ export function factorsOf(p: SnapshotProtocol, asOf: string, categoryRate: numbe
   const maturity = age === null ? 0.775 : 0.55 + 0.45 * (Math.min(age, 1460) / 1460);
   const breadth = 1 + 0.03 * Math.min(Math.max(p.chains.length - 1, 0), 5);
   return { category_rate, momentum, maturity, breadth };
+}
+
+/**
+ * How much evidence stands behind one row's rate, stated as a tier.
+ * band_pct is the width of the row's peer-spread range as a percentage
+ * of its implied value: a narrow band over many traded peers is a rate
+ * the snapshot itself corroborates; a wide band over few peers is a
+ * rate carried mostly by the shrinkage toward the global median.
+ *   high   — at least 8 traded peers and a band no wider than 300%
+ *   low    — fewer than 3 traded peers, or a band wider than 600%
+ *   medium — everything between
+ * The thresholds sit on this snapshot's own scale: peer bands here run
+ * wide (the median row's band is ~470% of its value), so a tier rule
+ * borrowed from tighter markets would call every row low and say
+ * nothing. Note what the tiers expose on this board: the largest
+ * category by implied value rests on a single traded peer, so its rows
+ * read low — the model flags its own biggest numbers as its least
+ * corroborated, which is the honest way round.
+ */
+export function confidenceOf(peers: number, bandPct: number): 'high' | 'medium' | 'low' {
+  if (peers < 3 || bandPct > 600) return 'low';
+  if (peers >= 8 && bandPct <= 300) return 'high';
+  return 'medium';
 }
 
 /** Factual cautions a row carries, read from its own figures only. */
@@ -394,6 +419,10 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     implied_low_usd: s.implied_low,
     implied_high_usd: s.implied_high,
     peers: { n: s.ri.peers, median: Math.round(s.ri.median * 1000) / 1000 },
+    confidence: {
+      tier: confidenceOf(s.ri.peers, Math.round(((s.implied_high - s.implied_low) / s.implied) * 100)),
+      band_pct: Math.round(((s.implied_high - s.implied_low) / s.implied) * 100),
+    },
     flags: flagsOf(s.p, snapshot.as_of, s.ri),
     ratio: Math.round((s.implied / Math.max(1, s.p.tvl_usd)) * 1000) / 1000,
     factors: s.f,
@@ -441,6 +470,11 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
       momentum_weight: MOMENTUM_WEIGHT,
       momentum_floor: MOMENTUM_FLOOR,
       momentum_cap: MOMENTUM_CAP,
+      confidence_counts: {
+        high: rows.filter((r) => r.confidence.tier === 'high').length,
+        medium: rows.filter((r) => r.confidence.tier === 'medium').length,
+        low: rows.filter((r) => r.confidence.tier === 'low').length,
+      },
     },
   };
   return { board, radar };

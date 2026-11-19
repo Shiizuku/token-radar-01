@@ -24,6 +24,12 @@
   <input id="q" type="search" placeholder="Search name or slug…" aria-label="Search protocols">
   <select id="cat" aria-label="Filter by category"></select>
   <select id="chain" aria-label="Filter by chain"></select>
+  <select id="conf" aria-label="Filter by confidence">
+    <option value="">Any confidence</option>
+    <option value="high">High confidence</option>
+    <option value="medium">Medium confidence</option>
+    <option value="low">Low confidence</option>
+  </select>
   <label class="check"><input id="watch" type="checkbox"> Watchlist only</label>
   <div class="views">
     <button id="view-board" class="viewbtn active" type="button">Pre-token board</button>
@@ -42,6 +48,7 @@
         <th data-sort="tvl" class="num">TVL</th>
         <th data-sort="change" class="num">7d change</th>
         <th data-sort="implied" class="num">Implied value</th>
+        <th data-sort="conf">Confidence</th>
         <th data-sort="ratio" class="num">Value / TVL</th>
         <th>Farm plan</th>
       </tr>

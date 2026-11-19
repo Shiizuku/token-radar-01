@@ -16,6 +16,7 @@ const state = {
   q: params.get('q') ?? '',
   cat: params.get('cat') ?? '',
   chain: params.get('chain') ?? '',
+  conf: params.get('conf') ?? '',
   watch: params.get('watch') === '1',
   view: params.get('view') === 'live' ? 'live' : 'board',
   sort: 'rank',
@@ -43,6 +44,10 @@ $('model').innerHTML =
   `Momentum follows the seven-day TVL change (clamped ${R.model.momentum_floor}%…+${R.model.momentum_cap}%, weight ${R.model.momentum_weight}); ` +
   `maturity grows with the years a protocol has run with no token; breadth adds 3% per extra chain, capped at +15%. ` +
   `Nothing is scored by name: the same function prices every row, and each protocol's detail view shows its four factors, its peer basis and its range. ` +
+  `Every row also carries a confidence tier, so a reader can tell a corroborated rate from a carried one: <b>high</b> when the category has at least 8 traded peers and the peer band is no wider than 300% of the value, ` +
+  `<b>low</b> when it has fewer than 3 peers or the band runs wider than 600%, <b>medium</b> between the two — on this board ${R.model.confidence_counts.high} high, ${R.model.confidence_counts.medium} medium and ${R.model.confidence_counts.low} low. ` +
+  `The board's largest rows are a standing example: the Risk Curators at the top rest on a single traded peer, so they read low — the model's biggest numbers are its least corroborated, and the board says so on their face. ` +
+  `The board can be filtered by tier, and a low tier is not a verdict on the protocol: it marks how little of the rate the snapshot's own traded set could check. ` +
   `Set aside unranked (${R.aside.cex + R.aside.bridge + R.aside.product}): centralised-exchange reserve listings (${R.aside.cex}), bridges and canonical bridges (${R.aside.bridge}), and wrapped, staked or exchange-issued products of assets that already trade (${R.aside.product}) — none of them is a protocol waiting on a first token.` +
   `<details><summary>Category rates as derived (value per $1 of TVL)</summary><table><tr><th>Category</th><th>Traded peers</th><th>Rate used</th></tr>` +
   rates.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${R.model.category_peers[k] ?? 0}</td><td>${v.toFixed(3)}</td></tr>`).join('') +
@@ -53,20 +58,24 @@ $('cat').innerHTML = `<option value="">All categories</option>` + R.categories.m
 $('chain').innerHTML = `<option value="">All chains</option>` + R.chains.map((c) => `<option ${c === state.chain ? 'selected' : ''}>${esc(c)}</option>`).join('');
 $('q').value = state.q;
 $('watch').checked = state.watch;
+$('conf').value = state.conf;
 
 function filtered() {
   const q = state.q.trim().toLowerCase();
   return R.rows.filter((r) =>
     (state.cat === '' || (r.category ?? 'Uncategorised') === state.cat) &&
     (state.chain === '' || r.chains.includes(state.chain)) &&
+    (state.conf === '' || r.confidence.tier === state.conf) &&
     (!state.watch || r.watchlist) &&
     (q === '' || r.name.toLowerCase().includes(q) || r.slug.includes(q)));
 }
 
+const TIER_ORDER = { high: 0, medium: 1, low: 2 };
 const SORTS = {
   rank: (r) => r.rank, name: (r) => r.name.toLowerCase(), category: (r) => (r.category ?? '').toLowerCase(),
   tvl: (r) => r.tvl_usd, change: (r) => (r.change_7d === null ? -Infinity : r.change_7d),
   implied: (r) => r.implied_value_usd, ratio: (r) => r.ratio,
+  conf: (r) => TIER_ORDER[r.confidence.tier] * 1000 - r.peers.n,
 };
 
 function renderBoard() {
@@ -83,6 +92,7 @@ function renderBoard() {
       <td class="num">${money(r.tvl_usd)}</td>
       <td class="num">${pct(r.change_7d)}</td>
       <td class="num implied">${money(r.implied_value_usd)}<br><span class="range">${compact(r.implied_low_usd)} – ${compact(r.implied_high_usd)}</span></td>
+      <td><span class="conf conf-${r.confidence.tier}">${r.confidence.tier}</span><br><span class="chains">${r.peers.n} traded peer${r.peers.n === 1 ? '' : 's'} · band ${r.confidence.band_pct}%</span></td>
       <td class="num">${r.ratio.toFixed(2)}×</td>
       <td class="plan">${r.farm_steps.length} steps →</td>
     </tr>`).join('');
@@ -111,6 +121,7 @@ function openDetail(slug) {
       <div class="fact"><b>${money(r.tvl_usd)}</b><span>TVL</span></div>
       <div class="fact"><b>${money(r.implied_value_usd)}</b><span>Implied value</span><div class="range">peer range ${compact(r.implied_low_usd)} – ${compact(r.implied_high_usd)}</div></div>
       <div class="fact"><b>${r.ratio.toFixed(2)}×</b><span>Value / TVL</span></div>
+      <div class="fact"><b style="text-transform:capitalize">${r.confidence.tier}</b><span>Confidence</span><div class="range">${r.peers.n} traded peer${r.peers.n === 1 ? '' : 's'} · peer band ${r.confidence.band_pct}% of value</div></div>
       <div class="fact"><b>${r.change_7d === null ? '—' : `${r.change_7d > 0 ? '+' : ''}${r.change_7d.toFixed(1)}%`}</b><span>TVL change, 7d</span></div>
       <div class="fact"><b>${esc(r.listed_at ?? 'unknown')}</b><span>Tracked since</span></div>
       <div class="fact"><b>${esc(r.chains.join(', ') || '—')}</b><span>Chains</span></div>
@@ -148,6 +159,7 @@ function setView(v) {
 $('q').addEventListener('input', (e) => { state.q = e.target.value; renderBoard(); });
 $('cat').addEventListener('change', (e) => { state.cat = e.target.value; renderBoard(); });
 $('chain').addEventListener('change', (e) => { state.chain = e.target.value; renderBoard(); });
+$('conf').addEventListener('change', (e) => { state.conf = e.target.value; renderBoard(); });
 $('watch').addEventListener('change', (e) => { state.watch = e.target.checked; renderBoard(); });
 $('view-board').addEventListener('click', () => setView('board'));
 $('view-live').addEventListener('click', () => setView('live'));
